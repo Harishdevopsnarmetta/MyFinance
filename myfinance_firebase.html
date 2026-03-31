@@ -1,6 +1,15 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
+<script>
+// Capture install prompt IMMEDIATELY — before any other JS loads
+window._pwaPrompt = null;
+window.addEventListener('beforeinstallprompt', function(e) {
+  e.preventDefault();
+  window._pwaPrompt = e;
+  console.log('PWA prompt captured early!');
+});
+</script>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
 <meta name="theme-color" content="#0b1120">
@@ -1807,41 +1816,58 @@ function seedDemo(){
 <script>
 /* ══ PWA SERVICE WORKER ══ */
 if('serviceWorker' in navigator){
-  window.addEventListener('load',()=>{
-    navigator.serviceWorker.register('sw.js')
-      .then(r=>console.log('SW registered'))
-      .catch(e=>console.log('SW error',e));
-  });
+  navigator.serviceWorker.register('sw.js')
+    .then(r=>console.log('SW registered:', r.scope))
+    .catch(e=>console.log('SW failed:', e));
 }
 
 /* ══ INSTALL PROMPT ══ */
-let deferredPrompt=null;
-window.addEventListener('beforeinstallprompt',e=>{
+// Also listen for late-firing prompt
+window.addEventListener('beforeinstallprompt', function(e){
   e.preventDefault();
-  deferredPrompt=e;
-  // Show banner after 3 seconds if user is logged in
-  setTimeout(()=>{
-    const banner=document.getElementById('pwaBanner');
-    if(banner && deferredPrompt) banner.classList.add('show');
-  },3000);
+  window._pwaPrompt = e;
+  tryShowBanner();
 });
 
-document.getElementById('pwaInstallBtn').addEventListener('click',async()=>{
-  if(!deferredPrompt) return;
-  deferredPrompt.prompt();
-  const {outcome}=await deferredPrompt.userChoice;
-  deferredPrompt=null;
+function tryShowBanner(){
+  if(localStorage.getItem('pwa_dismissed')) return;
+  if(window.matchMedia('(display-mode: standalone)').matches) return; // already installed
+  const banner = document.getElementById('pwaBanner');
+  if(!banner) return;
+  if(window._pwaPrompt){
+    banner.classList.add('show');
+  } else {
+    // iOS — show manual instructions
+    const isIOS = /iphone|ipad|ipod/i.test(navigator.userAgent);
+    if(isIOS){
+      document.querySelector('.pwa-sub').textContent = 'Tap Share → Add to Home Screen';
+      document.getElementById('pwaInstallBtn').style.display = 'none';
+      banner.classList.add('show');
+    }
+  }
+}
+
+// Try showing banner 2s after page load
+window.addEventListener('load', function(){
+  setTimeout(tryShowBanner, 2000);
+});
+
+document.getElementById('pwaInstallBtn').addEventListener('click', async function(){
+  const prompt = window._pwaPrompt;
+  if(!prompt){ toast('Use browser menu → Add to Home Screen','var(--blue)'); return; }
+  prompt.prompt();
+  const {outcome} = await prompt.userChoice;
+  window._pwaPrompt = null;
   document.getElementById('pwaBanner').classList.remove('show');
-  if(outcome==='accepted') toast('MyFinance installed! 🎉','var(--income)');
+  if(outcome === 'accepted') toast('MyFinance installed! 🎉','var(--income)');
 });
 
 function dismissPWA(){
   document.getElementById('pwaBanner').classList.remove('show');
-  deferredPrompt=null;
   localStorage.setItem('pwa_dismissed','1');
 }
 
-window.addEventListener('appinstalled',()=>{
+window.addEventListener('appinstalled', function(){
   toast('MyFinance installed! 🎉','var(--income)');
   document.getElementById('pwaBanner').classList.remove('show');
 });
